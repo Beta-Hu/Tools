@@ -1,0 +1,95 @@
+clc, clear;
+close all;
+
+
+root = 'C:/Users/Beta/OneDrive/Private/PostGraduate/TeX/CVPR2023/experiments/';
+
+methods = {'CU-Net', 'MFFNet', 'FPD', 'DeFusion', 'ZMFF', ...
+          'DRPL', 'DTMNet', 'GEU-Net', 'TIP22', 'Ours'};
+
+fileList = dir([root, 'CU-Net/*.png']);
+
+margin = 6;
+
+for item = 1: length(fileList)
+    fusion = {};
+    region = [];
+    sourceA = double(imread(fullfile(root, 'source', strrep(fileList(item).name, '.png', '-A.jpg'))));
+    sourceB = double(imread(fullfile(root, 'source', strrep(fileList(item).name, '.png', '-B.jpg'))));
+    
+    for methodIndex = 1: length(methods)
+        fusion = [fusion, double(imread(fullfile(root, methods{methodIndex}, fileList(item).name)))];
+        subplot(3, 4, methodIndex), imshow(uint8(fusion{methodIndex})), title(methods{methodIndex});
+    end
+    
+    while true
+        [x, y, button] = ginput(2);
+        w = min(x(2) - x(1), y(2) - y(1));
+        rectangle('Position', [x(1), y(1), w, w]);
+        region = [region; y(1), x(1), y(1) + w, x(1) + w];
+        if button(2) == 3
+            region = floor(region);
+            break;
+        end
+    end
+    
+    imageHeight = length(fusion{1}(:, 1, 1));
+    partSize = imageHeight / 2 - margin / 2;
+    padVerVertical = 255 * ones(partSize, margin, 3);
+    % crop and resize source images
+    regionA = sourceA(region(1, 1): region(1, 3), region(1, 2): region(1, 4), :);
+    regionA = imresize(regionA, [partSize, partSize]);
+    regionA = [padVerVertical, regionA, padVerVertical];
+    detailA = sourceB(region(1, 1): region(1, 3), region(1, 2): region(1, 4), :);
+    detailA = imresize(detailA, [partSize, partSize]);
+    detailA = [padVerVertical, detailA, padVerVertical];
+    regionB = sourceA(region(1, 1): region(1, 3), region(1, 2): region(1, 4), :);
+    regionB = imresize(regionB, [partSize, partSize]);
+    regionB = [padVerVertical, regionB, padVerVertical];
+    detailB = sourceB(region(1, 1): region(1, 3), region(1, 2): region(1, 4), :);
+    detailB = imresize(detailB, [partSize, partSize]);
+    detailB = [padVerVertical, detailB, padVerVertical];
+    
+    for methodIndex = 1: length(methods)
+        % get difference map
+        detail = 32 * abs(fusion{methodIndex} - sourceA);
+        % crop the first part and resize
+        partA = fusion{methodIndex}(region(1, 1): region(1, 3), region(1, 2): region(1, 4), :);
+        partA = imresize(partA, [partSize, partSize]);
+        % merge the first part
+        regionA = [regionA, padVerVertical, partA];
+        % same operations for difference map
+        partDetailA = detail(region(1, 1): region(1, 3), region(1, 2): region(1, 4), :);
+        partDetailA = imresize(partDetailA, [partSize, partSize]);
+        detailA = [detailA, padVerVertical, partDetailA];
+        % same operations for the second part
+        partB = fusion{methodIndex}(region(2, 1): region(2, 3), region(2, 2): region(2, 4), :);
+        partB = imresize(partB, [partSize, partSize]);
+        regionB = [regionB, padVerVertical, partB];
+        partDetailB = detail(region(2, 1): region(2, 3), region(2, 2): region(2, 4), :);
+        partDetailB = imresize(partDetailB, [partSize, partSize]);
+        detailB = [detailB, padVerVertical, partDetailB];
+    end
+    % draw rectangle on source image
+    sourceA = drawRectangleOnImage(sourceA, region(1, :), [255, 0, 0]);
+    sourceA = drawRectangleOnImage(sourceA, region(2, :), [0, 255, 0]);
+    sourceB = drawRectangleOnImage(sourceB, region(1, :), [255, 0, 0]);
+    sourceB = drawRectangleOnImage(sourceB, region(2, :), [0, 255, 0]);
+    % merge all cropped part and source images
+    source = [sourceA; 255 * ones(margin, length(sourceA(1, :, 1)), 3); sourceB];
+    padVerHorizontal = 255 * ones(margin, length(regionA(1, :, 1)), 3);
+    merge = [source, [regionA; padVerHorizontal; detailA; padVerHorizontal; regionB; padVerHorizontal; detailB]];
+    
+    imwrite(uint8(merge), fullfile('output', fileList(item).name))
+    close;
+end
+
+
+function image = drawRectangleOnImage(image, rect, color)
+    for c = 1: length(image(1, 1, :))
+        image(rect(1): rect(3), rect(2), c) = color(c);
+        image(rect(1): rect(3), rect(4), c) = color(c);
+        image(rect(1), rect(2): rect(4), c) = color(c);
+        image(rect(3), rect(2): rect(4), c) = color(c);
+    end
+end
